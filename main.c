@@ -25,7 +25,7 @@ typedef struct ExpressionNode {
 
 int randWithWeight(Rule rule);
 ExpressionNode *buildExpressionTree(Rule grammar[MAX_RULE_NUM], int pos, int depth);
-double evaluateExpressionTree(ExpressionNode *root, int x, int y);
+double evaluateExpressionTree(ExpressionNode *root, double x, double y);
 void freeExpressionTree(ExpressionNode *root);
 
 double add(double nums[MAX_ARG_NUM]);
@@ -63,7 +63,7 @@ ExpressionNode *buildExpressionTree(Rule grammar[MAX_RULE_NUM], int pos, int dep
     return res;
 }
 
-double evaluateExpressionTree(ExpressionNode *root, int x, int y)
+double evaluateExpressionTree(ExpressionNode *root, double x, double y)
 {
     double params[MAX_ARG_NUM];
 
@@ -91,7 +91,47 @@ void freeExpressionTree(ExpressionNode *root)
         freeExpressionTree(root->args[i]);
     }
 
-    return free(root);
+    free(root);
+}
+
+void printExpressionTree(ExpressionNode *root)
+{
+    if (!root->args[0]) {
+        if (root->func == add) {
+            printf("ADD(x, y)");
+        }
+        else if (root->func == mult) {
+            printf("MULT(x, y)");
+        }
+        else if (root->func == randNorm) {
+            printf("rand()");
+        }
+        else if (root->func == getX) {
+            printf("x");
+        }
+        else if (root->func == getY) {
+            printf("y");
+        }
+
+        return;
+    }
+
+    if (root->func == add) {
+        printf("ADD(");
+    }
+    else if (root->func == mult) {
+        printf("MULT(");
+    }
+    else if (root->func == identity) {
+        printf("ID(");
+    }
+
+    for (int i = 0; i < root->arg_num; i++) {
+        printExpressionTree(root->args[i]);
+        if (i != root->arg_num - 1)
+            printf(", ");
+    }
+    printf(")");
 }
 
 int randWithWeight(Rule rule)
@@ -161,18 +201,25 @@ int main(void)
             .is_terminal = {1, 1, 1},
             .funcs = {randNorm, getX, getY},
             .rule_args = {{0}},
-            .prob = {59.0/100.0, 40.0/100.0, 1.0/100.0},
+            .prob = {1.0/3.0, 1.0/3.0, 1.0/3.0},
         },
     };
 
     srand(time(NULL));
-    ExpressionNode *r_root = buildExpressionTree(grammar, 0, 15);
-    ExpressionNode *g_root = buildExpressionTree(grammar, 0, 15);
-    ExpressionNode *b_root = buildExpressionTree(grammar, 0, 15);
+    ExpressionNode *r_root = buildExpressionTree(grammar, 0, 5);
+    ExpressionNode *g_root = buildExpressionTree(grammar, 0, 5);
+    ExpressionNode *b_root = buildExpressionTree(grammar, 0, 5);
 
-    r = evaluateExpressionTree(r_root, 1, 2);
-    g = evaluateExpressionTree(g_root, 1, 2);
-    b = evaluateExpressionTree(b_root, 1, 2);
+    printExpressionTree(r_root);
+    printf("\n");
+    printExpressionTree(g_root);
+    printf("\n");
+    printExpressionTree(b_root);
+    printf("\n");
+
+    r = evaluateExpressionTree(r_root, 0.7, -0.3);
+    g = evaluateExpressionTree(g_root, 0.7, -0.3);
+    b = evaluateExpressionTree(b_root, 0.7, -0.3);
 
     freeExpressionTree(r_root);
     freeExpressionTree(g_root);
