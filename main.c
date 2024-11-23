@@ -2,9 +2,15 @@
 #include <stdlib.h>
 #include <time.h>
 
-#define MAX_FUNC_NUM 10
-#define MAX_ARG_NUM  10
-#define MAX_RULE_NUM 20
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+
+#define MAX_FUNC_NUM      10
+#define MAX_ARG_NUM       10
+#define MAX_RULE_NUM      20
+#define IMG_WIDTH         800
+#define IMG_HEIGHT        800
+#define IMG_CHANNEL_NUM   3
 
 typedef double (*Func)(double[MAX_ARG_NUM]);
 
@@ -55,6 +61,9 @@ ExpressionNode *buildExpressionTree(Rule grammar[MAX_RULE_NUM], int pos, int dep
         return res;
     }
     
+    if (depth >= 0 && (double)rand() / RAND_MAX < 0.5)
+        depth -= 1;
+
     for (int i = 0; i < rule.arg_num[func_chosen_idx]; i++) {
         int arg_rule_pos = rule.rule_args[func_chosen_idx][i];
         res->args[i] = buildExpressionTree(grammar, arg_rule_pos, depth - 1);
@@ -185,7 +194,6 @@ double getY(double nums[MAX_ARG_NUM])
 
 int main(void)
 {
-    double r, g, b;
     Rule grammar[MAX_RULE_NUM] = {
         [0] = {
             .func_num = 3,
@@ -204,11 +212,12 @@ int main(void)
             .prob = {1.0/3.0, 1.0/3.0, 1.0/3.0},
         },
     };
+    unsigned char img[IMG_HEIGHT * IMG_WIDTH * IMG_CHANNEL_NUM];
 
     srand(time(NULL));
-    ExpressionNode *r_root = buildExpressionTree(grammar, 0, 5);
-    ExpressionNode *g_root = buildExpressionTree(grammar, 0, 5);
-    ExpressionNode *b_root = buildExpressionTree(grammar, 0, 5);
+    ExpressionNode *r_root = buildExpressionTree(grammar, 0, 7);
+    ExpressionNode *g_root = buildExpressionTree(grammar, 0, 7);
+    ExpressionNode *b_root = buildExpressionTree(grammar, 0, 7);
 
     printExpressionTree(r_root);
     printf("\n");
@@ -217,15 +226,26 @@ int main(void)
     printExpressionTree(b_root);
     printf("\n");
 
-    r = evaluateExpressionTree(r_root, 0.7, -0.3);
-    g = evaluateExpressionTree(g_root, 0.7, -0.3);
-    b = evaluateExpressionTree(b_root, 0.7, -0.3);
+    for (int i = 0; i < IMG_HEIGHT; i++) {
+        for (int j = 0; j < IMG_WIDTH; j++) {
+            int idx = (i * IMG_HEIGHT + j) * IMG_CHANNEL_NUM;
+            double x_norm = i / (double)IMG_HEIGHT * 2 - 1;
+            double y_norm = j / (double)IMG_WIDTH * 2 - 1;
+            img[idx + 0] = (evaluateExpressionTree(r_root, x_norm, y_norm) + 1) / 2 * 255;
+            img[idx + 1] = (evaluateExpressionTree(g_root, x_norm, y_norm) + 1) / 2 * 255;
+            img[idx + 2] = (evaluateExpressionTree(b_root, x_norm, y_norm) + 1) / 2 * 255;
+        }
+    }
+
+    if (stbi_write_png("randart.png", IMG_WIDTH, IMG_HEIGHT, IMG_CHANNEL_NUM, img, IMG_CHANNEL_NUM * IMG_WIDTH)) {
+        printf("Image saved as 'randart.png'\n");
+    } else {
+        fprintf(stderr, "Failed to save image\n");
+    }
 
     freeExpressionTree(r_root);
     freeExpressionTree(g_root);
     freeExpressionTree(b_root);
-
-    printf("RGB is: %f, %f, %f\n", r, g, b);
 
     return 0;
 }
