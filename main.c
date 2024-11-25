@@ -397,8 +397,8 @@ int main(int argc, char **argv)
     int exit_code;
     int entry_symbol_arr[3] = {0};
     Rule grammar[MAX_RULE_NUM] = {0};
-    if (argc != 2) {
-        fprintf(stderr, "Usage: ./rart <grammar_file>\n");
+    if (argc != 3) {
+        fprintf(stderr, "Usage: ./rart <grammar_file> <output_image_file>\n");
         exit(1);
     }
 
@@ -431,7 +431,7 @@ int main(int argc, char **argv)
     }
 
     if (stbi_write_png("randart.png", IMG_WIDTH, IMG_HEIGHT, 3, img, 3 * IMG_WIDTH)) {
-        printf("Image saved as 'randart.png'\n");
+        printf("Image saved as %s\n", argv[2]);
     } else {
         fprintf(stderr, "Failed to save image\n");
     }
