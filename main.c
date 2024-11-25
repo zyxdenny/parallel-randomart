@@ -68,12 +68,12 @@ double tan_func(double *nums);
 FuncInfo func_collection[] = {
     { get_x,       0,   "GET_X" },
     { get_y,       0,   "GET_Y" },
-    { rand_norm,   0,   "RAND_NORM" },
-    { identity,    1,   "IDENTITY" },
-    { sin_func,    1,   "SIN_FUNC" },
-    { tan_func,    1,   "TAN_FUNC" },
-    { neg_func,    1,   "NEG_FUNC" },
-    { sqrt_func,   1,   "SQRT_FUNC" },
+    { rand_norm,   0,   "RAND" },
+    { identity,    1,   "ID" },
+    { sin_func,    1,   "SIN" },
+    { tan_func,    1,   "TAN" },
+    { neg_func,    1,   "NEG" },
+    { sqrt_func,   1,   "SQRT" },
     { add,         2,   "ADD" },
     { mult,        2,   "MULT" },
     { mix,         3,   "MIX" },
@@ -439,33 +439,6 @@ int main(int argc, char **argv)
     freeExpressionTree(r_root);
     freeExpressionTree(g_root);
     freeExpressionTree(b_root);
-
-    // Rule grammar[MAX_RULE_NUM] = {
-    //     [0] = {
-    //         .func_num = 4,
-    //         .arg_num = {1, 2, 2, 1},
-    //         .is_terminal = {0, 0, 0, 0},
-    //         .funcs = {identity, add, mult, tan_func},
-    //         .rule_args = {{1}, {0, 2}, {2, 0}, {1}},
-    //         .prob = {1.0/4.0, 3.0/8.0, 2.0/8.0, 1.0/8.0},
-    //     },
-    //     [1] = {
-    //         .func_num = 3,
-    //         .arg_num = {0, 0, 1},
-    //         .is_terminal = {1, 1, 0},
-    //         .funcs = {get_x, get_y, neg_func},
-    //         .rule_args = {{}, {}, {2}},
-    //         .prob = {1.0/3.0, 1.0/3.0, 1.0/3.0},
-    //     },
-    //     [2] = {
-    //         .func_num = 4,
-    //         .arg_num = {1, 3, 0, 1},
-    //         .is_terminal = {0, 0, 1, 0},
-    //         .funcs = {sin_func, mix, rand_norm, sqrt_func},
-    //         .rule_args = {{1}, {2, 1, 0}, {}, {2}},
-    //         .prob = {1.0/4.0, 1.0/4.0, 1.0/4.0, 1.0/4.0},
-    //     },
-    // };
 
     return 0;
 }
