@@ -1,0 +1,32 @@
+# Grammar file
+##############
+# The first line defines all the rule symbols used in the grammar
+#
+# The second line is the entry rule for RGB, respectively
+#
+# The following lines are grammar rules
+# Each line has the following patter:
+# <rule> -> <prob1> <func1> [subrule1_1] [subrule1_2] ... | <prob2> <func2> [subrule2_1] ... | ...
+#
+# Supported functions (function name, arity):
+#   GET_X       0
+#   GET_Y       0
+#   RAND_NORM   0
+#   IDENTITY    1
+#   SIN_FUNC    1
+#   TAN_FUNC    1
+#   NEG_FUNC    1
+#   SQRT_FUNC   1
+#   ADD         2
+#   MULT        2
+#   MIX         3
+#
+# Note: The rules must be constructed such that if the FIRST subrule is always chosen,
+# a terminal will be finally reached (otherwise there will be dead locks)
+
+A C X Y
+C C C
+X -> 1 GET_X
+Y -> 1 GET_Y
+A -> 0.333 RAND_NORM | 0.333 IDENTITY X | 0.333 IDENTITY Y
+C -> 0.25 IDENTITY A | 0.375 ADD C C | 0.375 MULT C C
