@@ -18,6 +18,12 @@
 #define PI                3.14159
 #define MAX_SYMBOL_LEN    10
 
+enum {
+    X,
+    Y,
+    RAND_NUM,
+};
+
 typedef double (*Func)(double[MAX_ARG_NUM]);
 
 typedef struct FuncInfo {
@@ -115,9 +121,9 @@ double evaluateExpressionTree(ExpressionNode *root, double x, double y, int dept
     double res;
 
     if (root->func_info.arity == 0) {
-        params[0] = x;
-        params[1] = y;
-        params[2] = root->rand_num;
+        params[X] = x;
+        params[Y] = y;
+        params[RAND_NUM] = root->rand_num;
         return root->func_info.func(params);
     }
 
@@ -394,17 +400,17 @@ double identity(double *nums)
 
 double get_x(double *nums)
 {
-    return nums[0];
+    return nums[X];
 }
 
 double get_y(double *nums)
 {
-    return nums[1];
+    return nums[Y];
 }
 
 double rand_norm(double *nums)
 {
-    return nums[2];
+    return nums[RAND_NUM];
 }
 
 
