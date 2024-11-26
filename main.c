@@ -40,11 +40,12 @@ typedef struct Rule {
 typedef struct ExpressionNode {
     FuncInfo func_info;
     struct ExpressionNode *args[MAX_ARG_NUM];
+    double rand_num;
 } ExpressionNode;
 
 
 ExpressionNode *buildExpressionTree(Rule *grammar, int pos, int depth);
-double evaluateExpressionTree(ExpressionNode *root, double x, double y);
+double evaluateExpressionTree(ExpressionNode *root, double x, double y, int depth);
 void freeExpressionTree(ExpressionNode *root);
 int rand_with_weight(Rule rule);
 void func_info_cpy(FuncInfo *dest, FuncInfo *source);
@@ -103,11 +104,12 @@ ExpressionNode *buildExpressionTree(Rule *grammar, int pos, int depth)
         int arg = rule.sub_rules[func_chosen_idx].args[i];
         res->args[i] = buildExpressionTree(grammar, arg, depth - 1);
     }
+    res->rand_num = (double)rand() / RAND_MAX * 2 - 1;
 
     return res;
 }
 
-double evaluateExpressionTree(ExpressionNode *root, double x, double y)
+double evaluateExpressionTree(ExpressionNode *root, double x, double y, int depth)
 {
     double params[MAX_ARG_NUM];
     double res;
@@ -115,13 +117,23 @@ double evaluateExpressionTree(ExpressionNode *root, double x, double y)
     if (root->func_info.arity == 0) {
         params[0] = x;
         params[1] = y;
+        params[2] = root->rand_num;
         return root->func_info.func(params);
     }
 
-    for (int i = 0; i < root->func_info.arity; i++) {
-        params[i] = evaluateExpressionTree(root->args[i], x, y);
-    }
+    if (depth < 3) {
+        for (int i = 0; i < root->func_info.arity; i++) {
+#           pragma omp task shared(params)
+            params[i] = evaluateExpressionTree(root->args[i], x, y, depth + 1);
+        }
 
+#       pragma omp taskwait
+    }
+    else {
+        for (int i = 0; i < root->func_info.arity; i++) {
+            params[i] = evaluateExpressionTree(root->args[i], x, y, depth + 1);
+        }
+    }
     res = root->func_info.func(params);
     if (res < -1 || res > 1) {
         printf("function %s has a problem\n", root->func_info.func_name);
@@ -153,8 +165,8 @@ void printExpressionTree(ExpressionNode *root)
 
 int rand_with_weight(Rule rule)
 {
-    double rand_value = (double)rand() / RAND_MAX;
-    double acc_prob = 0;
+    float rand_value = (float)rand() / (float)RAND_MAX;
+    float acc_prob = 0;
     int i = 0;
 
     for (; i < rule.func_num; i++) {
@@ -340,15 +352,25 @@ void fill_image(unsigned char *img, int width, int height,
         ExpressionNode *r_root, ExpressionNode *g_root, ExpressionNode *b_root,
         int threads_cnt)
 {
-#   pragma omp parallel for num_threads(threads_cnt) collapse(2)
+//#   pragma omp parallel for num_threads(threads_cnt) collapse(2)
+//#   pragma omp parallel num_threads(threads_cnt)
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
             int idx = (i * width + j) * 3;
-            double x_norm = i / (double)height * 2 - 1;
-            double y_norm = j / (double)width * 2 - 1;
-            img[idx + 0] = (evaluateExpressionTree(r_root, x_norm, y_norm) + 1) / 2 * 255;
-            img[idx + 1] = (evaluateExpressionTree(g_root, x_norm, y_norm) + 1) / 2 * 255;
-            img[idx + 2] = (evaluateExpressionTree(b_root, x_norm, y_norm) + 1) / 2 * 255;
+            double x_norm = (double)i / (double)height * 2 - 1;
+            double y_norm = (double)j / (double)width * 2 - 1;
+//#           pragma omp single
+            double r_norm = evaluateExpressionTree(r_root, x_norm, y_norm, 0);
+            double g_norm = evaluateExpressionTree(g_root, x_norm, y_norm, 0);
+            double b_norm = evaluateExpressionTree(b_root, x_norm, y_norm, 0);
+            img[idx + 0] = (r_norm + 1) / 2 * 255;
+            img[idx + 1] = (g_norm + 1) / 2 * 255;
+            img[idx + 2] = (b_norm + 1) / 2 * 255;
+            //img[idx + 0] = (evaluateExpressionTree(r_root, x_norm, y_norm, 0) + 1) / 2 * 255;
+//#           pragma omp single
+            //img[idx + 1] = (evaluateExpressionTree(g_root, x_norm, y_norm, 0) + 1) / 2 * 255;
+//#           pragma omp single
+            //img[idx + 2] = (evaluateExpressionTree(b_root, x_norm, y_norm, 0) + 1) / 2 * 255;
         }
     }
 }
@@ -370,12 +392,6 @@ double identity(double *nums)
     return nums[0];
 }
 
-double rand_norm(double *nums)
-{
-    /* returns a random number between -1 and 1 */
-    return (double)rand() / RAND_MAX * 2 - 1;
-}
-
 double get_x(double *nums)
 {
     return nums[0];
@@ -385,6 +401,12 @@ double get_y(double *nums)
 {
     return nums[1];
 }
+
+double rand_norm(double *nums)
+{
+    return nums[2];
+}
+
 
 double sin_func(double *nums)
 {
@@ -457,7 +479,9 @@ int main(int argc, char **argv)
             flag_print = 1;
             break;
         default: // Invalid option
-            fprintf(stderr, "Usage: %s GRAMMAR_FILE [-o OUTPUT_FILE] [-w WIDTH] [-h HEIGHT] [-d DEPTH] [-t NUM_THREADS] [-c] [-p]\n", argv[0]);
+            fprintf(stderr,
+                    "Usage: %s GRAMMAR_FILE [-o OUTPUT_FILE] [-w WIDTH] [-h HEIGHT] [-d DEPTH] [-t NUM_THREADS] [-c] [-p]\n",
+                    argv[0]);
             return 1;
         }
     }
@@ -486,6 +510,7 @@ int main(int argc, char **argv)
         printExpressionTree(b_root);
         printf("\n\n");
     }
+
 
     double tstart, tstop, ttaken;
     tstart = omp_get_wtime();
