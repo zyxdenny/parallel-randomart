@@ -1,8 +1,10 @@
 #include <math.h>
+#include <omp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -50,6 +52,9 @@ char *get_real_line(char *buffer, int buffer_size, FILE *file);
 int find_symbol(char *symbol, char symbol_arr[MAX_RULE_NUM][MAX_SYMBOL_LEN + 1], int symbol_arr_size);
 int find_func(char *func_name);
 int parse_from_file(char *file_name, int entry_symbol_arr[3], Rule grammar[MAX_RULE_NUM]);
+void fill_image(unsigned char *img, int width, int height,
+        ExpressionNode *r_root, ExpressionNode *g_root, ExpressionNode *b_root,
+        int threads_cnt);
 
 double add(double *nums);
 double mult(double *nums);
@@ -89,7 +94,6 @@ ExpressionNode *buildExpressionTree(Rule *grammar, int pos, int depth)
     func_chosen_idx = depth <= 0 ?
         0 : rand_with_weight(rule);
     func_chosen = rule.sub_rules[func_chosen_idx].func_info;
-    
     func_info_cpy(&res->func_info, &func_chosen);
 
     if (depth >= 0 && (double)rand() / RAND_MAX < 0.5)
@@ -138,15 +142,13 @@ void freeExpressionTree(ExpressionNode *root)
 void printExpressionTree(ExpressionNode *root)
 {
     printf("%s", root->func_info.func_name);
-    if (root->func_info.func != get_x && root->func_info.func != get_y)
-        printf("(");
+    printf("(");
     for (int i = 0; i < root->func_info.arity; i++) {
         printExpressionTree(root->args[i]);
         if (i != root->func_info.arity - 1)
             printf(", ");
     }
-    if (root->func_info.func != get_x && root->func_info.func != get_y)
-        printf(")");
+    printf(")");
 }
 
 int rand_with_weight(Rule rule)
@@ -158,10 +160,12 @@ int rand_with_weight(Rule rule)
     for (; i < rule.func_num; i++) {
         acc_prob += rule.sub_rules[i].prob;
         if (rand_value < acc_prob)
-            break;
+            return i;
     }
 
-    return i;
+    if (i != 0)
+        return i - 1;
+    return 0;
 }
 
 void func_info_cpy(FuncInfo *dest, FuncInfo *source)
@@ -332,6 +336,23 @@ int parse_from_file(char *file_name, int entry_symbol_arr[3], Rule grammar[MAX_R
     return EXIT_SUCCESS;
 }
 
+void fill_image(unsigned char *img, int width, int height,
+        ExpressionNode *r_root, ExpressionNode *g_root, ExpressionNode *b_root,
+        int threads_cnt)
+{
+#   pragma omp parallel for num_threads(threads_cnt) collapse(2)
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            int idx = (i * width + j) * 3;
+            double x_norm = i / (double)height * 2 - 1;
+            double y_norm = j / (double)width * 2 - 1;
+            img[idx + 0] = (evaluateExpressionTree(r_root, x_norm, y_norm) + 1) / 2 * 255;
+            img[idx + 1] = (evaluateExpressionTree(g_root, x_norm, y_norm) + 1) / 2 * 255;
+            img[idx + 2] = (evaluateExpressionTree(b_root, x_norm, y_norm) + 1) / 2 * 255;
+        }
+    }
+}
+
 
 /* functions in expressions */
 double add(double *nums)
@@ -394,48 +415,105 @@ double tan_func(double *nums)
 
 int main(int argc, char **argv)
 {
-    int exit_code;
-    int entry_symbol_arr[3] = {0};
-    Rule grammar[MAX_RULE_NUM] = {0};
-    if (argc != 3) {
-        fprintf(stderr, "Usage: ./rart <grammar_file> <output_image_file>\n");
-        exit(1);
+    // Parse command line
+    char *grammar_file = NULL;
+    char *output_file = "out.png";
+    int width = IMG_WIDTH, height = IMG_HEIGHT, threads_cnt = 1, depth = 5;
+    int flag_cmp = 0;
+    int flag_print = 0;
+
+    // Ensure at least GRAMMAR_FILE is provided
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s GRAMMAR_FILE [-o OUTPUT_FILE] [-w WIDTH] [-h HEIGHT] [-t NUM_THREADS] [-c]\n", argv[0]);
+        return 1;
     }
 
-    exit_code = parse_from_file(argv[1], entry_symbol_arr, grammar);
-    if (exit_code == EXIT_FAILURE)
-        exit(1);
+    // GRAMMAR_FILE is the first argument
+    grammar_file = argv[1];
 
-    unsigned char img[IMG_HEIGHT * IMG_WIDTH * 3];
-    srand(time(NULL));
-    ExpressionNode *r_root = buildExpressionTree(grammar, entry_symbol_arr[0], 10);
-    ExpressionNode *g_root = buildExpressionTree(grammar, entry_symbol_arr[1], 10);
-    ExpressionNode *b_root = buildExpressionTree(grammar, entry_symbol_arr[2], 10);
-
-    printExpressionTree(r_root);
-    printf("\n");
-    printExpressionTree(g_root);
-    printf("\n");
-    printExpressionTree(b_root);
-    printf("\n");
-
-    for (int i = 0; i < IMG_HEIGHT; i++) {
-        for (int j = 0; j < IMG_WIDTH; j++) {
-            int idx = (i * IMG_HEIGHT + j) * 3;
-            double x_norm = i / (double)IMG_HEIGHT * 2 - 1;
-            double y_norm = j / (double)IMG_WIDTH * 2 - 1;
-            img[idx + 0] = (evaluateExpressionTree(r_root, x_norm, y_norm) + 1) / 2 * 255;
-            img[idx + 1] = (evaluateExpressionTree(g_root, x_norm, y_norm) + 1) / 2 * 255;
-            img[idx + 2] = (evaluateExpressionTree(b_root, x_norm, y_norm) + 1) / 2 * 255;
+    // Parse optional arguments using getopt
+    int opt;
+    while ((opt = getopt(argc - 1, argv + 1, "o:w:h:t:d:cp")) != -1) {
+        switch (opt) {
+        case 'o':
+            output_file = optarg;
+            break;
+        case 'w':
+            width = atoi(optarg);
+            break;
+        case 'h':
+            height = atoi(optarg);
+            break;
+        case 't':
+            threads_cnt = atoi(optarg);
+            break;
+        case 'd':
+            depth = atoi(optarg);
+            break;
+        case 'c':
+            flag_cmp = 1;
+            break;
+        case 'p':
+            flag_print = 1;
+            break;
+        default: // Invalid option
+            fprintf(stderr, "Usage: %s GRAMMAR_FILE [-o OUTPUT_FILE] [-w WIDTH] [-h HEIGHT] [-d DEPTH] [-t NUM_THREADS] [-c] [-p]\n", argv[0]);
+            return 1;
         }
     }
 
-    if (stbi_write_png("randart.png", IMG_WIDTH, IMG_HEIGHT, 3, img, 3 * IMG_WIDTH)) {
-        printf("Image saved as %s\n", argv[2]);
-    } else {
-        fprintf(stderr, "Failed to save image\n");
+    int exit_code;
+    int entry_symbol_arr[3] = {0};
+    Rule grammar[MAX_RULE_NUM] = {0};
+    exit_code = parse_from_file(grammar_file, entry_symbol_arr, grammar);
+    if (exit_code == EXIT_FAILURE)
+        return 1;
+
+    unsigned char *img = (unsigned char*)malloc(sizeof(unsigned char) * height * width * 3);
+    srand(time(NULL));
+    ExpressionNode *r_root = buildExpressionTree(grammar, entry_symbol_arr[0], depth);
+    ExpressionNode *g_root = buildExpressionTree(grammar, entry_symbol_arr[1], depth);
+    ExpressionNode *b_root = buildExpressionTree(grammar, entry_symbol_arr[2], depth);
+
+    if (flag_print) {
+        printf("R channel:\n");
+        printExpressionTree(r_root);
+        printf("\n\n");
+        printf("G channel:\n");
+        printExpressionTree(g_root);
+        printf("\n\n");
+        printf("B channel:\n");
+        printExpressionTree(b_root);
+        printf("\n\n");
     }
 
+    double tstart, tstop, ttaken;
+    tstart = omp_get_wtime();
+    fill_image(img, width, height, r_root, g_root, b_root, threads_cnt);
+    tstop = omp_get_wtime();
+    ttaken = tstop - tstart;
+    printf("Time taken for generating the image with %d threads is: %.4f\n", threads_cnt, ttaken);
+
+    if (flag_cmp) {
+        struct timespec tstart_1, tstop_1;
+        double ttaken_1;
+        clock_gettime(CLOCK_MONOTONIC, &tstart_1);
+        fill_image(img, width, height, r_root, g_root, b_root, 1);
+        clock_gettime(CLOCK_MONOTONIC, &tstop_1);
+        ttaken_1 = (tstop_1.tv_sec - tstart_1.tv_sec) + 
+            (tstop_1.tv_nsec - tstart_1.tv_nsec) / 1e9;
+        printf("Time taken for generating the image sequentially is: %.4f\n", ttaken_1);
+        printf("Speedup: %.4f    Efficiency: %.4f\n\n", ttaken_1 / ttaken, ttaken_1 / ttaken / threads_cnt);
+    }
+
+    if (stbi_write_png(output_file, width, height, 3, img, 3 * width)) {
+        printf("Image saved as %s\n", output_file);
+    } else {
+        fprintf(stderr, "Failed to save image\n");
+        return 1;
+    }
+
+    free(img);
     freeExpressionTree(r_root);
     freeExpressionTree(g_root);
     freeExpressionTree(b_root);
