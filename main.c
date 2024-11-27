@@ -50,16 +50,20 @@ typedef struct ExpressionNode {
 } ExpressionNode;
 
 
-ExpressionNode *buildExpressionTree(Rule *grammar, int pos, int depth);
-double evaluateExpressionTree(ExpressionNode *root, double x, double y, int depth);
-void freeExpressionTree(ExpressionNode *root);
+ExpressionNode *build_expression_tree(Rule *grammar, int pos, int depth);
+double evaluate_expression_tree(ExpressionNode *root, double x, double y, int depth);
+double evaluate_expression_tree_parallel(ExpressionNode *root, double x, double y, int depth);
+void free_expression_tree(ExpressionNode *root);
 int rand_with_weight(Rule rule);
 void func_info_cpy(FuncInfo *dest, FuncInfo *source);
 char *get_real_line(char *buffer, int buffer_size, FILE *file);
 int find_symbol(char *symbol, char symbol_arr[MAX_RULE_NUM][MAX_SYMBOL_LEN + 1], int symbol_arr_size);
 int find_func(char *func_name);
 int parse_from_file(char *file_name, int entry_symbol_arr[3], Rule grammar[MAX_RULE_NUM]);
-void fill_image(unsigned char *img, int width, int height,
+void fill_image_loop_parallel(unsigned char *img, int width, int height,
+        ExpressionNode *r_root, ExpressionNode *g_root, ExpressionNode *b_root,
+        int threads_cnt);
+void fill_image_rec_parallel(unsigned char *img, int width, int height,
         ExpressionNode *r_root, ExpressionNode *g_root, ExpressionNode *b_root,
         int threads_cnt);
 
@@ -91,7 +95,7 @@ FuncInfo func_collection[] = {
     { mix,         3,   "MIX" },
 };
 
-ExpressionNode *buildExpressionTree(Rule *grammar, int pos, int depth)
+ExpressionNode *build_expression_tree(Rule *grammar, int pos, int depth)
 {
     Rule rule = grammar[pos];
     FuncInfo func_chosen;
@@ -108,14 +112,37 @@ ExpressionNode *buildExpressionTree(Rule *grammar, int pos, int depth)
 
     for (int i = 0; i < rule.sub_rules[func_chosen_idx].func_info.arity; i++) {
         int arg = rule.sub_rules[func_chosen_idx].args[i];
-        res->args[i] = buildExpressionTree(grammar, arg, depth - 1);
+        res->args[i] = build_expression_tree(grammar, arg, depth - 1);
     }
     res->rand_num = (double)rand() / RAND_MAX * 2 - 1;
 
     return res;
 }
 
-double evaluateExpressionTree(ExpressionNode *root, double x, double y, int depth)
+double evaluate_expression_tree(ExpressionNode *root, double x, double y, int depth)
+{
+    double params[MAX_ARG_NUM];
+    double res;
+
+    if (root->func_info.arity == 0) {
+        params[X] = x;
+        params[Y] = y;
+        params[RAND_NUM] = root->rand_num;
+        return root->func_info.func(params);
+    }
+
+    for (int i = 0; i < root->func_info.arity; i++) {
+        params[i] = evaluate_expression_tree(root->args[i], x, y, depth + 1);
+    }
+    res = root->func_info.func(params);
+    if (res < -1 || res > 1) {
+        printf("function %s has a problem\n", root->func_info.func_name);
+        exit(1);
+    }
+    return res;
+}
+
+double evaluate_expression_tree_parallel(ExpressionNode *root, double x, double y, int depth)
 {
     double params[MAX_ARG_NUM];
     double res;
@@ -130,14 +157,14 @@ double evaluateExpressionTree(ExpressionNode *root, double x, double y, int dept
     if (depth < 3) {
         for (int i = 0; i < root->func_info.arity; i++) {
 #           pragma omp task shared(params)
-            params[i] = evaluateExpressionTree(root->args[i], x, y, depth + 1);
+            params[i] = evaluate_expression_tree(root->args[i], x, y, depth + 1);
         }
 
 #       pragma omp taskwait
     }
     else {
         for (int i = 0; i < root->func_info.arity; i++) {
-            params[i] = evaluateExpressionTree(root->args[i], x, y, depth + 1);
+            params[i] = evaluate_expression_tree(root->args[i], x, y, depth + 1);
         }
     }
     res = root->func_info.func(params);
@@ -148,21 +175,21 @@ double evaluateExpressionTree(ExpressionNode *root, double x, double y, int dept
     return res;
 }
 
-void freeExpressionTree(ExpressionNode *root)
+void free_expression_tree(ExpressionNode *root)
 {
     for (int i = 0; i < root->func_info.arity; i++) {
-        freeExpressionTree(root->args[i]);
+        free_expression_tree(root->args[i]);
     }
 
     free(root);
 }
 
-void printExpressionTree(ExpressionNode *root)
+void print_expression_tree(ExpressionNode *root)
 {
     printf("%s", root->func_info.func_name);
     printf("(");
     for (int i = 0; i < root->func_info.arity; i++) {
-        printExpressionTree(root->args[i]);
+        print_expression_tree(root->args[i]);
         if (i != root->func_info.arity - 1)
             printf(", ");
     }
@@ -354,29 +381,39 @@ int parse_from_file(char *file_name, int entry_symbol_arr[3], Rule grammar[MAX_R
     return EXIT_SUCCESS;
 }
 
-void fill_image(unsigned char *img, int width, int height,
+void fill_image_loop_parallel(unsigned char *img, int width, int height,
         ExpressionNode *r_root, ExpressionNode *g_root, ExpressionNode *b_root,
         int threads_cnt)
 {
-//#   pragma omp parallel for num_threads(threads_cnt) collapse(2)
-//#   pragma omp parallel num_threads(threads_cnt)
+#   pragma omp parallel for num_threads(threads_cnt) collapse(2)
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
             int idx = (i * width + j) * 3;
             double x_norm = (double)i / (double)height * 2 - 1;
             double y_norm = (double)j / (double)width * 2 - 1;
-//#           pragma omp single
-            double r_norm = evaluateExpressionTree(r_root, x_norm, y_norm, 0);
-            double g_norm = evaluateExpressionTree(g_root, x_norm, y_norm, 0);
-            double b_norm = evaluateExpressionTree(b_root, x_norm, y_norm, 0);
-            img[idx + 0] = (r_norm + 1) / 2 * 255;
-            img[idx + 1] = (g_norm + 1) / 2 * 255;
-            img[idx + 2] = (b_norm + 1) / 2 * 255;
-            //img[idx + 0] = (evaluateExpressionTree(r_root, x_norm, y_norm, 0) + 1) / 2 * 255;
-//#           pragma omp single
-            //img[idx + 1] = (evaluateExpressionTree(g_root, x_norm, y_norm, 0) + 1) / 2 * 255;
-//#           pragma omp single
-            //img[idx + 2] = (evaluateExpressionTree(b_root, x_norm, y_norm, 0) + 1) / 2 * 255;
+            img[idx + 0] = (evaluate_expression_tree(r_root, x_norm, y_norm, 0) + 1) / 2 * 255;
+            img[idx + 1] = (evaluate_expression_tree(g_root, x_norm, y_norm, 0) + 1) / 2 * 255;
+            img[idx + 2] = (evaluate_expression_tree(b_root, x_norm, y_norm, 0) + 1) / 2 * 255;
+        }
+    }
+}
+
+void fill_image_rec_parallel(unsigned char *img, int width, int height,
+        ExpressionNode *r_root, ExpressionNode *g_root, ExpressionNode *b_root,
+        int threads_cnt)
+{
+#   pragma omp parallel num_threads(threads_cnt)
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            int idx = (i * width + j) * 3;
+            double x_norm = (double)i / (double)height * 2 - 1;
+            double y_norm = (double)j / (double)width * 2 - 1;
+#           pragma omp single
+            img[idx + 0] = (evaluate_expression_tree_parallel(r_root, x_norm, y_norm, 0) + 1) / 2 * 255;
+#           pragma omp single
+            img[idx + 1] = (evaluate_expression_tree_parallel(g_root, x_norm, y_norm, 0) + 1) / 2 * 255;
+#           pragma omp single
+            img[idx + 2] = (evaluate_expression_tree_parallel(b_root, x_norm, y_norm, 0) + 1) / 2 * 255;
         }
     }
 }
@@ -449,6 +486,7 @@ int main(int argc, char **argv)
     int width = IMG_WIDTH, height = IMG_HEIGHT, threads_cnt = 1, depth = 5;
     int flag_cmp = 0;
     int flag_print = 0;
+    int flag_rec_parallel = 0;
 
     // Ensure at least GRAMMAR_FILE is provided
     if (argc < 2) {
@@ -461,7 +499,7 @@ int main(int argc, char **argv)
 
     // Parse optional arguments using getopt
     int opt;
-    while ((opt = getopt(argc - 1, argv + 1, "o:w:h:t:d:cp")) != -1) {
+    while ((opt = getopt(argc - 1, argv + 1, "o:w:h:t:d:cpr")) != -1) {
         switch (opt) {
         case 'o':
             output_file = optarg;
@@ -484,9 +522,12 @@ int main(int argc, char **argv)
         case 'p':
             flag_print = 1;
             break;
+        case 'r':
+            flag_rec_parallel = 1;
+            break;
         default: // Invalid option
             fprintf(stderr,
-                    "Usage: %s GRAMMAR_FILE [-o OUTPUT_FILE] [-w WIDTH] [-h HEIGHT] [-d DEPTH] [-t NUM_THREADS] [-c] [-p]\n",
+                    "Usage: %s GRAMMAR_FILE [-o OUTPUT_FILE] [-w WIDTH] [-h HEIGHT] [-d DEPTH] [-t NUM_THREADS] [-c] [-p] [-r]\n",
                     argv[0]);
             return 1;
         }
@@ -501,26 +542,33 @@ int main(int argc, char **argv)
 
     unsigned char *img = (unsigned char*)malloc(sizeof(unsigned char) * height * width * 3);
     srand(time(NULL));
-    ExpressionNode *r_root = buildExpressionTree(grammar, entry_symbol_arr[0], depth);
-    ExpressionNode *g_root = buildExpressionTree(grammar, entry_symbol_arr[1], depth);
-    ExpressionNode *b_root = buildExpressionTree(grammar, entry_symbol_arr[2], depth);
+    ExpressionNode *r_root = build_expression_tree(grammar, entry_symbol_arr[0], depth);
+    ExpressionNode *g_root = build_expression_tree(grammar, entry_symbol_arr[1], depth);
+    ExpressionNode *b_root = build_expression_tree(grammar, entry_symbol_arr[2], depth);
 
     if (flag_print) {
         printf("R channel:\n");
-        printExpressionTree(r_root);
+        print_expression_tree(r_root);
         printf("\n\n");
         printf("G channel:\n");
-        printExpressionTree(g_root);
+        print_expression_tree(g_root);
         printf("\n\n");
         printf("B channel:\n");
-        printExpressionTree(b_root);
+        print_expression_tree(b_root);
         printf("\n\n");
     }
 
 
     double tstart, tstop, ttaken;
     tstart = omp_get_wtime();
-    fill_image(img, width, height, r_root, g_root, b_root, threads_cnt);
+    if (flag_rec_parallel) {
+        printf("Recursion parallel algorithm is chosen\n\n");
+        fill_image_rec_parallel(img, width, height, r_root, g_root, b_root, threads_cnt);
+    }
+    else {
+        printf("Loop parallel algorithm is chosen\n\n");
+        fill_image_loop_parallel(img, width, height, r_root, g_root, b_root, threads_cnt);
+    }
     tstop = omp_get_wtime();
     ttaken = tstop - tstart;
     printf("Time taken for generating the image with %d threads is: %.4f\n", threads_cnt, ttaken);
@@ -529,7 +577,7 @@ int main(int argc, char **argv)
         struct timespec tstart_1, tstop_1;
         double ttaken_1;
         clock_gettime(CLOCK_MONOTONIC, &tstart_1);
-        fill_image(img, width, height, r_root, g_root, b_root, 1);
+        fill_image_loop_parallel(img, width, height, r_root, g_root, b_root, 1);
         clock_gettime(CLOCK_MONOTONIC, &tstop_1);
         ttaken_1 = (tstop_1.tv_sec - tstart_1.tv_sec) + 
             (tstop_1.tv_nsec - tstart_1.tv_nsec) / 1e9;
@@ -545,9 +593,9 @@ int main(int argc, char **argv)
     }
 
     free(img);
-    freeExpressionTree(r_root);
-    freeExpressionTree(g_root);
-    freeExpressionTree(b_root);
+    free_expression_tree(r_root);
+    free_expression_tree(g_root);
+    free_expression_tree(b_root);
 
     return 0;
 }
