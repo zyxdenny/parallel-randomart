@@ -17,6 +17,7 @@
 #define IMG_CHANNEL_NUM   3
 #define PI                3.14159
 #define MAX_SYMBOL_LEN    10
+#define DEPTH_THRESHOLD   4
 
 enum {
     X,
@@ -78,6 +79,7 @@ double neg_func(double *nums);
 double sqrt_func(double *nums);
 double mix(double *nums);
 double tan_func(double *nums);
+double eight_sum(double *nums);
 
 
 /* Global variables */
@@ -93,6 +95,7 @@ FuncInfo func_collection[] = {
     { add,         2,   "ADD" },
     { mult,        2,   "MULT" },
     { mix,         3,   "MIX" },
+    { eight_sum,   8,   "EIGHT_SUM" },
 };
 
 ExpressionNode *build_expression_tree(Rule *grammar, int pos, int depth)
@@ -134,11 +137,8 @@ double evaluate_expression_tree(ExpressionNode *root, double x, double y, int de
     for (int i = 0; i < root->func_info.arity; i++) {
         params[i] = evaluate_expression_tree(root->args[i], x, y, depth + 1);
     }
+
     res = root->func_info.func(params);
-    if (res < -1 || res > 1) {
-        printf("function %s has a problem\n", root->func_info.func_name);
-        exit(1);
-    }
     return res;
 }
 
@@ -154,7 +154,7 @@ double evaluate_expression_tree_parallel(ExpressionNode *root, double x, double 
         return root->func_info.func(params);
     }
 
-    if (depth < 3) {
+    if (depth < DEPTH_THRESHOLD) {
         for (int i = 0; i < root->func_info.arity; i++) {
 #           pragma omp task shared(params)
             params[i] = evaluate_expression_tree(root->args[i], x, y, depth + 1);
@@ -167,11 +167,8 @@ double evaluate_expression_tree_parallel(ExpressionNode *root, double x, double 
             params[i] = evaluate_expression_tree(root->args[i], x, y, depth + 1);
         }
     }
+
     res = root->func_info.func(params);
-    if (res < -1 || res > 1) {
-        printf("function %s has a problem\n", root->func_info.func_name);
-        exit(1);
-    }
     return res;
 }
 
@@ -477,6 +474,15 @@ double tan_func(double *nums)
     return 1 / (1 + exp(-tan(PI * nums[0]))) * 2 - 1;
 }
 
+double eight_sum(double *nums)
+{
+    int sum = 0;
+    for (int i = 0; i < 8; i++) {
+        sum += nums[i];
+    }
+    return sum;
+}
+
 
 int main(int argc, char **argv)
 {
@@ -490,7 +496,7 @@ int main(int argc, char **argv)
 
     // Ensure at least GRAMMAR_FILE is provided
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s GRAMMAR_FILE [-o OUTPUT_FILE] [-w WIDTH] [-h HEIGHT] [-t NUM_THREADS] [-c]\n", argv[0]);
+        fprintf(stderr, "Usage: %s GRAMMAR_FILE [-o OUTPUT_FILE] [-w WIDTH] [-h HEIGHT] [-t NUM_THREADS] [-d DEPTH] [-c] [-p] [-r]\n", argv[0]);
         return 1;
     }
 
@@ -583,6 +589,13 @@ int main(int argc, char **argv)
             (tstop_1.tv_nsec - tstart_1.tv_nsec) / 1e9;
         printf("Time taken for generating the image sequentially is: %.4f\n", ttaken_1);
         printf("Speedup: %.4f    Efficiency: %.4f\n\n", ttaken_1 / ttaken, ttaken_1 / ttaken / threads_cnt);
+
+        // if (stbi_write_png("comp.png", width, height, 3, img, 3 * width)) {
+        //     printf("Image saved as comp.png\n");
+        // } else {
+        //     fprintf(stderr, "Failed to save image\n");
+        //     return 1;
+        // }
     }
 
     if (stbi_write_png(output_file, width, height, 3, img, 3 * width)) {
